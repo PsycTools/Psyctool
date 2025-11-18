@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PsycTools - AI Creative Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: #020617;
+      }
+      .aurora-background {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-image: radial-gradient(ellipse 80% 50% at 20% 40%, rgba(120, 119, 198, 0.2), transparent),
+                          radial-gradient(ellipse 80% 50% at 80% 50%, rgba(51, 179, 227, 0.15), transparent);
+        opacity: 0.6;
+        pointer-events: none;
+        z-index: -2;
+        animation: subtle-breathing 8s ease-in-out infinite alternate;
+      }
+
+      .grid-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 3rem 3rem;
+        pointer-events: none;
+        z-index: -1;
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      .animate-fade-in {
+        animation: fadeIn 0.7s ease-out forwards;
+      }
+
+      @keyframes subtle-breathing {
+        from { opacity: 0.4; }
+        to { opacity: 0.7; }
+      }
+
+      @keyframes pulse-glow {
+        0%, 100% {
+          box-shadow: 0 0 15px rgba(139, 92, 246, 0.2), 0 0 25px rgba(59, 130, 246, 0.15);
+        }
+        50% {
+          box-shadow: 0 0 25px rgba(139, 92, 246, 0.3), 0 0 40px rgba(59, 130, 246, 0.2);
+        }
+      }
+
+      .btn-pulse-glow {
+        animation: pulse-glow 3s ease-in-out infinite;
+      }
+      
+      @keyframes gradient-pan {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+
+      .animate-gradient-pan {
+        background-size: 200% 200%;
+        animation: gradient-pan 15s ease infinite;
+      }
+    </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://aistudiocdn.com/react@^19.2.0",
+      "react-dom/client": "https://aistudiocdn.com/react-dom@^19.2.0/client",
+      "@google/genai": "https://aistudiocdn.com/@google/genai@^1.29.1"
+    }
+  }
+  </script>
+</head>
+  <body class="bg-slate-950">
+    <div class="aurora-background"></div>
+    <div class="grid-background"></div>
+    <div id="root">
+        <div style="display: flex; justify-content: center; align-items: center; height: 100vh; color: white; font-family: 'Inter', sans-serif; font-size: 1.2rem;">
+            Loading PsycTools...
+        </div>
+    </div>
+    <script type="module">
+        import React, { useState, useEffect, useRef, useCallback, cloneElement } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import { GoogleGenAI } from "@google/genai";
+
+        // Guard against process.env not existing in a browser environment to prevent app crash
+        window.process = window.process || { env: {} };
+
+        // --- Gemini Service ---
+        const apiKey = process.env.API_KEY;
+        let ai;
+        if (apiKey) {
+            try {
+                ai = new GoogleGenAI({ apiKey });
+            } catch (e) {
+                console.error("Error initializing GoogleGenAI:", e);
+                ai = null;
+            }
+        } else {
+            console.error("CRITICAL: API_KEY environment variable not set. AI tools will not function.");
+        }
+
+        const generateContent = async (prompt, systemInstruction) => {
+          if (!ai) {
+              throw new Error("API_KEY is not configured or failed to initialize. Please check the environment variable.");
+          }
+          try {
+            const response = await ai.models.generateContent({
+                model: "gemini-2.5-flash",
+                contents: prompt,
+                config: {
+                    systemInstruction: systemInstruction,
+                    temperature: 0.7,
+                    topP: 0.95,
+                    topK: 64,
+                }
+            });
+
+            const text = response.text;
+            if (text) {
+                return text.trim();
+            } else {
+                throw new Error("The model returned an empty response. This might be due to content safety filters.");
+            }
+          } catch (error) {
+            console.error("Error generating content with Gemini API:", error);
+            throw new Error("An error occurred while communicating with the AI service.");
+          }
+        };
+
+        // --- Components ---
+
+        const Spinner = () => (
+            React.createElement("svg", {
+              className: "animate-spin h-5 w-5 text-white",
+              xmlns: "http://www.w3.org/2000/svg",
+              fill: "none",
+              viewBox: "0 0 24 24"
+            },
+            React.createElement("circle", {
+              className: "opacity-25",
+              cx: "12",
+              cy: "12",
+              r: "10",
+              stroke: "currentColor",
+              strokeWidth: "4"
+            }),
+            React.createElement("path", {
+              className: "opacity-75",
+              fill: "currentColor",
+              d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            }))
+        );
+
+        const LogoIcon = ({ className }) => (
+            React.createElement("svg", {
+                viewBox: "0 0 24 24",
+                fill: "none",
+                xmlns: "http://www.w3.org/2000/svg",
+                className: className
+            },
+            React.createElement("defs", null,
+                React.createElement("linearGradient", { id: "logoGradient", x1: "0%", y1: "0%", x2: "100%", y2: "100%" },
+                    React.createElement("stop", { offset: "0%", stopColor: "#c084fc" }),
+                    React.createElement("stop", { offset: "100%", stopColor: "#60a5fa" })
+                )
+            ),
+            React.createElement("path", {
+                d: "M12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 9.46782 21.1637 7.12348 19.8284 5.23437",
+                stroke: "url(#logoGradient)",
+                strokeWidth: "1.5"
+            }),
+            React.createElement("path", {
+                d: "M12 8C9.79086 8 8 9.79086 8 12C8 14.2091 9.79086 16 12 16C14.2091 16 16 14.2091 16 12C16 9.79086 14.2091 8 12 8Z",
+                fill: "url(#logoGradient)"
+            }),
+            React.createElement("path", {
+                d: "M16 12C16 12.3506 15.9554 12.6891 15.8741 13M18 10C18.6667 10.3333 19 11 19 12C19 13.5 18 14.6667 17 15",
+                stroke: "url(#logoGradient)",
+                strokeWidth: "1.5",
+                strokeLinecap: "round",
+                strokeLinejoin: "round"
+            }))
+        );
+
+        const SimpleSvgIcon = ({ children, className }) => React.createElement("svg", { xmlns:"http://www.w3.org/2000/svg", width:"24", height:"24", viewBox:"0 0 24 24", fill:"none", stroke:"currentColor", strokeWidth:"2", strokeLinecap:"round", strokeLinejoin:"round", className}, children);
+        const YouTubeIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("rect", {x:"3", y:"3", width:"18", height:"18", rx:"4"}), React.createElement("path", {d:"m10 8 6 4-6 4Z"}));
+        const WriterIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"}), React.createElement("path", {d:"m15 5 4 4"}));
+        const ChatbotIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"}));
+        const ArrowLeftIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("line", {x1:"19", y1:"12", x2:"5", y2:"12"}), React.createElement("polyline", {points:"12 19 5 12 12 5"}));
+        const SparklesIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M12 3a6 6 0 0 0 9 9a9 9 0 1 1-9-9Z"}), React.createElement("path", {d:"M18 12h-6"}), React.createElement("path", {d:"M15 9h.01"}), React.createElement("path", {d:"M15 15h.01"}));
+        const BookOpenIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"}), React.createElement("path", {d:"M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"}));
+        const ClipboardIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("rect", {width:"8", height:"4", x:"8", y:"2", rx:"1", ry:"1"}), React.createElement("path", {d:"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"}));
+        const CheckIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("polyline", {points:"20 6 9 17 4 12"}));
+        const SendIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("line", {x1:"22", y1:"2", x2:"11", y2:"13"}), React.createElement("polygon", {points:"22 2 15 22 11 13 2 9 22 2"}));
+        const DescriptionIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"}), React.createElement("line", {x1:"7", y1:"7", x2:"7.01", y2:"7"}));
+        const AdCopyIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"m7 11 2-8-2-8-2 8 2 8Z"}), React.createElement("path", {d:"M13 21v-5.5a2.5 2.5 0 0 0-5 0V21"}), React.createElement("path", {d:"M6 21h2"}), React.createElement("path", {d:"M16 21h2"}), React.createElement("path", {d:"M12 21h2"}), React.createElement("path", {d:"M17 3 15 2l-2 3 2 3 2-3Z"}), React.createElement("path", {d:"M22 11h-4.26a3 3 0 0 0-5.48 0H3"}));
+        const HookIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M18 9.5a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z"}), React.createElement("path", {d:"M13.5 9.5V15c0 4.25-3.75 6-3.75 6"}), React.createElement("path", {d:"M13.5 9.5H15V6c0-2-1-3-3-3s-3 1-3 3v3.5h1.5"}));
+        const OutlineIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M21 15.58a2.5 2.5 0 0 0-3.54 0L15.58 17.5a2.51 2.51 0 0 0 0 3.54l1.88 1.88a2.5 2.5 0 0 0 3.54 0l1.88-1.88a2.51 2.51 0 0 0 0-3.54Z"}), React.createElement("path", {d:"M12 2v2.5"}), React.createElement("path", {d:"M14.5 4.5 12 7 9.5 4.5"}), React.createElement("path", {d:"M12 7v10"}), React.createElement("path", {d:"M9 17h6"}));
+        const HashtagIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("line", {x1:"4", x2:"20", y1:"9", y2:"9"}), React.createElement("line", {x1:"4", x2:"20", y1:"15", y2:"15"}), React.createElement("line", {x1:"10", x2:"8", y1:"3", y2:"21"}), React.createElement("line", {x1:"16", x2:"14", y1:"3", y2:"21"}));
+        const CaptionIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("rect", {x:"3", y:"3", width:"18", height:"18", rx:"2"}), React.createElement("path", {d:"M7 8h10"}), React.createElement("path", {d:"M7 12h10"}), React.createElement("path", {d:"M7 16h4"}));
+        const GrammarIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"m6 16 6-12 6 12"}), React.createElement("path", {d:"M8 12h8"}), React.createElement("path", {d:"m16 4-3 3"}), React.createElement("path", {d:"M19.5 12.5 22 15l-2.5 2.5"}), React.createElement("path", {d:"m17 15 h 5"}));
+        const SummarizeIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M10 16V8"}), React.createElement("path", {d:"M14 16V8"}), React.createElement("path", {d:"M20 6h-4a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"}), React.createElement("path", {d:"M4 18h4a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2H4"}));
+        const NotesIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M15.27 2.43a1 1 0 0 1 .73.73l2.55 6.13a1 1 0 0 0 .8.54l6.32 1.25a1 1 0 0 1 .56 1.7L21 17.8a1 1 0 0 0-.3.94l1 6.1a1 1 0 0 1-1.45 1.05l-5.7-2.32a1 1 0 0 0-.95 0l-5.7 2.32a1 1 0 0 1-1.45-1.05l1-6.1a1 1 0 0 0-.3-.94L.24 12.8a1 1 0 0 1 .56-1.7l6.32-1.25a1 1 0 0 0 .8-.54l2.55-6.13a1 1 0 0 1 .73-.73Z"}), React.createElement("path", {d:"M12 14.5a2.5 2.5 0 0 0 0-5 2.5 2.5 0 0 0 0 5Z"}));
+        const IdeaIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M15.05 5A5 5 0 0 1 19 8.95M15.05 1A9 9 0 0 1 23 8.94m-1 7.48A9 9 0 0 1 8.94 23M5 15.05A5 5 0 0 1 8.95 19M1 15.05A9 9 0 0 1 8.94 1m7.48 1A9 9 0 0 1 23 8.94M5 1A5 5 0 0 0 8.95 5M1 5A9 9 0 0 0 8.94 9"}), React.createElement("circle", {cx:"12", cy:"12", r:"3"}));
+        const SEOIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M12 20V10"}), React.createElement("path", {d:"M18 20V4"}), React.createElement("path", {d:"M6 20V16"}));
+        const TranslateIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"m5 8 6 6"}), React.createElement("path", {d:"m4 14 6-6 2-3"}), React.createElement("path", {d:"M2 5h12"}), React.createElement("path", {d:"M7 2h1"}), React.createElement("path", {d:"m22 22-5-10-5 10"}), React.createElement("path", {d:"M14 18h6"}));
+        const EmailIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("rect", {width:"20", height:"16", x:"2", y:"4", rx:"2"}), React.createElement("path", {d:"m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"}));
+        const ProductIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M12 2v4"}), React.createElement("path", {d:"M12 22v-4"}), React.createElement("path", {d:"M22 12h-4"}), React.createElement("path", {d:"M4 12h4"}), React.createElement("path", {d:"m15.88 15.88-3.54-3.54"}), React.createElement("path", {d:"m20.66 3.34-3.54 3.54"}), React.createElement("path", {d:"m9.17 9.17-3.54-3.54"}), React.createElement("path", {d:"m4.93 19.07 3.54-3.54"}), React.createElement("path", {d:"m15.88 8.12-3.54 3.54"}), React.createElement("path", {d:"m20.66 20.66-3.54-3.54"}), React.createElement("path", {d:"m9.17 14.83-3.54 3.54"}), React.createElement("path", {d:"m4.93 4.93 3.54 3.54"}));
+        const ReviewIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("polygon", {points:"12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"}));
+        const CodeIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("polyline", {points:"16 18 22 12 16 6"}), React.createElement("polyline", {points:"8 6 2 12 8 18"}));
+        const BugIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M12 20c-3.3 0-6-2.7-6-6v-4c0-3.3 2.7-6 6-6h0c3.3 0 6 2.7 6 6v4c0 3.3-2.7 6-6 6Z"}), React.createElement("path", {d:"m16 4-2 2"}), React.createElement("path", {d:"m8 4 2 2"}), React.createElement("path", {d:"m12 14-3 4h6l-3-4"}), React.createElement("path", {d:"m18 10 2-2"}), React.createElement("path", {d:"m6 10-2-2"}));
+        const QnAIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3"}), React.createElement("path", {d:"M12 17h.01"}), React.createElement("circle", {cx:"12", cy:"12", r:"10"}));
+        const ExamIcon = ({ className }) => React.createElement(SimpleSvgIcon, {className}, React.createElement("path", {d:"M12 22V10"}), React.createElement("path", {d:"M6 10.37a6 6 0 1 1 12 0"}), React.createElement("path", {d:"M4 14.01a2 2 0 0 0 1.95 1.95l1.63.41a2 2 0 0 1 1.48 1.48l.41 1.63a2 2 0 0 0 3.9 0l.41-1.63a2 2 0 0 1 1.48-1.48l1.63-.41a2 2 0 0 0 1.95-1.95z"}));
+        
+        const colorStyles = {
+            red: { spotlight: 'from-red-500/15 to-transparent', iconBg: 'from-red-500/20 to-slate-900/30', iconText: 'text-red-400' },
+            blue: { spotlight: 'from-blue-500/15 to-transparent', iconBg: 'from-blue-500/20 to-slate-900/30', iconText: 'text-blue-400' },
+            green: { spotlight: 'from-green-500/15 to-transparent', iconBg: 'from-green-500/20 to-slate-900/30', iconText: 'text-green-400' },
+            purple: { spotlight: 'from-purple-500/15 to-transparent', iconBg: 'from-purple-500/20 to-slate-900/30', iconText: 'text-purple-400' },
+            orange: { spotlight: 'from-orange-500/15 to-transparent', iconBg: 'from-orange-500/20 to-slate-900/30', iconText: 'text-orange-400' },
+            pink: { spotlight: 'from-pink-500/15 to-transparent', iconBg: 'from-pink-500/20 to-slate-900/30', iconText: 'text-pink-400' },
+            teal: { spotlight: 'from-teal-500/15 to-transparent', iconBg: 'from-teal-500/20 to-slate-900/30', iconText: 'text-teal-400' },
+            yellow: { spotlight: 'from-yellow-500/15 to-transparent', iconBg: 'from-yellow-500/20 to-slate-900/30', iconText: 'text-yellow-400' },
+            cyan: { spotlight: 'from-cyan-500/15 to-transparent', iconBg: 'from-cyan-500/20 to-slate-900/30', iconText: 'text-cyan-400' },
+        };
+        
+        const ToolCard = ({ tool, onClick }) => {
+          const divRef = useRef(null);
+          const { title, description, icon, color } = tool;
+          const styles = colorStyles[color];
+
+          const onMouseMove = (e) => {
+            if (!divRef.current) return;
+            const { clientX, clientY } = e;
+            const { left, top } = divRef.current.getBoundingClientRect();
+            divRef.current.style.setProperty("--x", `${clientX - left}px`);
+            divRef.current.style.setProperty("--y", `${clientY - top}px`);
+          };
+
+          return React.createElement("button", {
+              ref: divRef,
+              onClick: onClick,
+              onMouseMove: onMouseMove,
+              className: "group relative bg-slate-900/60 rounded-2xl p-6 text-left w-full transition-all duration-300 hover:-translate-y-1 backdrop-blur-lg border border-slate-700/50 overflow-hidden",
+              "aria-label": `Open ${title}`,
+              style: {'--x': '0px', '--y': '0px'}
+            },
+            React.createElement("div", {
+              className: `absolute inset-0 transition-all duration-500 opacity-0 group-hover:opacity-100 bg-[radial-gradient(250px_circle_at_var(--x)_var(--y),_var(--tw-gradient-stops))] ${styles.spotlight}`,
+              "aria-hidden": "true"
+            }),
+            React.createElement("div", { className: "relative flex items-start gap-5" },
+              React.createElement("div", { className: `flex-shrink-0 bg-gradient-to-br ${styles.iconBg} p-3 rounded-lg border border-slate-700/50 ${styles.iconText}`}, icon),
+              React.createElement("div", null,
+                React.createElement("h3", { className: "text-xl font-bold text-slate-100" }, title),
+                React.createElement("p", { className: "mt-1 text-slate-400" }, description)
+              )
+            )
+          );
+        };
+        
+        const genericToolColorStyles = {
+            red: { ring: 'focus:ring-red-500 focus:border-red-500', text: 'text-red-400', shadow: 'shadow-red-500/10' },
+            blue: { ring: 'focus:ring-blue-500 focus:border-blue-500', text: 'text-blue-400', shadow: 'shadow-blue-500/10' },
+            green: { ring: 'focus:ring-green-500 focus:border-green-500', text: 'text-green-400', shadow: 'shadow-green-500/10' },
+            purple: { ring: 'focus:ring-purple-500 focus:border-purple-500', text: 'text-purple-400', shadow: 'shadow-purple-500/10' },
+            orange: { ring: 'focus:ring-orange-500 focus:border-orange-500', text: 'text-orange-400', shadow: 'shadow-orange-500/10' },
+            pink: { ring: 'focus:ring-pink-500 focus:border-pink-500', text: 'text-pink-400', shadow: 'shadow-pink-500/10' },
+            teal: { ring: 'focus:ring-teal-500 focus:border-teal-500', text: 'text-teal-400', shadow: 'shadow-teal-500/10' },
+            yellow: { ring: 'focus:ring-yellow-500 focus:border-yellow-500', text: 'text-yellow-400', shadow: 'shadow-yellow-500/10' },
+            cyan: { ring: 'focus:ring-cyan-500 focus:border-cyan-500', text: 'text-cyan-400', shadow: 'shadow-cyan-500/10' },
+        };
+
+        const GenericTool = ({ tool }) => {
+          const [prompt, setPrompt] = useState('');
+          const [result, setResult] = useState('');
+          const [isLoading, setIsLoading] = useState(false);
+          const [error, setError] = useState(null);
+          const [isCopied, setIsCopied] = useState(false);
+
+          const styles = genericToolColorStyles[tool.color];
+
+          const handleGenerate = useCallback(async () => {
+            if (!prompt.trim()) {
+              setError(`Please enter a value for: ${tool.promptLabel}.`);
+              return;
+            }
+            setIsLoading(true);
+            setError(null);
+            setResult('');
+            setIsCopied(false);
+
+            try {
+              const generatedResult = await generateContent(prompt, tool.systemInstruction);
+              setResult(generatedResult);
+            } catch (err) {
+              setError('Failed to generate content. The API may be unavailable or the request was blocked. Please try again later.');
+              console.error(err);
+            } finally {
+              setIsLoading(false);
+            }
+          }, [prompt, tool.systemInstruction, tool.promptLabel]);
+
+          const handleCopy = () => {
+            if (result) {
+              navigator.clipboard.writeText(result);
+              setIsCopied(true);
+              setTimeout(() => setIsCopied(false), 2000);
+            }
+          };
+          
+          const handleDemoClick = () => {
+            setPrompt(tool.demoPrompt);
+          };
+
+          const SkeletonLoader = () => (
+            React.createElement("div", { className: "space-y-4 animate-pulse" },
+              React.createElement("div", { className: "h-4 bg-slate-700 rounded w-3/4" }),
+              React.createElement("div", { className: "h-4 bg-slate-700 rounded w-full" }),
+              React.createElement("div", { className: "h-4 bg-slate-700 rounded w-full" }),
+              React.createElement("div", { className: "h-4 bg-slate-700 rounded w-5/6" }),
+              React.createElement("div", { className: "h-4 bg-slate-700 rounded w-1/2" })
+            )
+          );
+
+          return React.createElement(React.Fragment, null,
+            React.createElement("div", { className: `bg-slate-900/50 backdrop-blur-lg border border-slate-700/50 rounded-2xl p-6 md:p-8 shadow-2xl ${styles.shadow}` },
+              React.createElement("div", { className: "flex items-center gap-4 mb-5" },
+                React.createElement("div", { className: `p-2 bg-slate-800/80 rounded-lg border border-slate-700 ${styles.text}` },
+                   cloneElement(tool.icon, { className: 'w-8 h-8' })
+                ),
+                React.createElement("h2", { className: "text-2xl font-bold" }, tool.title)
+              ),
+              React.createElement("p", { className: "text-slate-400 mb-6" }, tool.description),
+              React.createElement("label", { htmlFor: "prompt-textarea", className: "block text-sm font-medium text-slate-300 mb-2" }, tool.promptLabel),
+              React.createElement("textarea", {
+                id: "prompt-textarea",
+                value: prompt,
+                onChange: (e) => setPrompt(e.target.value),
+                placeholder: tool.promptPlaceholder,
+                className: `w-full h-32 p-4 bg-slate-900 border border-slate-700 rounded-lg focus:ring-2 ${styles.ring} focus:outline-none transition-all duration-200 resize-none`,
+                disabled: isLoading,
+                "aria-label": tool.promptLabel
+              }),
+              React.createElement("div", { className: "flex flex-col sm:flex-row items-center gap-4 mt-6" },
+                React.createElement("button", {
+                  onClick: handleGenerate,
+                  disabled: isLoading,
+                  className: "w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300 transform hover:scale-105 btn-pulse-glow"
+                },
+                  isLoading ? React.createElement(React.Fragment, null, React.createElement(Spinner, null), React.createElement("span", null, "Generating..."))
+                            : React.createElement(React.Fragment, null, React.createElement(SparklesIcon, { className: "w-5 h-5" }), React.createElement("span", null, "Generate"))
+                ),
+                React.createElement("button", {
+                  onClick: handleDemoClick,
+                  disabled: isLoading,
+                  className: "w-full sm:w-auto text-sm text-slate-400 hover:text-white transition-colors"
+                }, "Try Demo Prompt")
+              ),
+              error && React.createElement("p", { className: "mt-4 text-red-400 bg-red-900/50 p-3 rounded-lg", role: "alert" }, error)
+            ),
+            (isLoading || result) && React.createElement("div", { className: `mt-8 bg-slate-900/50 backdrop-blur-lg border border-slate-700/50 rounded-2xl p-6 md:p-8 shadow-2xl ${styles.shadow}` },
+              React.createElement("div", { className: "flex justify-between items-center mb-4" },
+                React.createElement("h2", { className: "text-2xl font-bold" }, tool.outputTitle),
+                result && !isLoading && React.createElement("button", {
+                  onClick: handleCopy,
+                  className: "flex items-center gap-2 px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 rounded-md transition-colors",
+                  title: "Copy to clipboard",
+                  "aria-label": `Copy generated ${tool.outputTitle}`
+                },
+                  isCopied ? React.createElement(CheckIcon, { className: "w-4 h-4 text-green-400" }) : React.createElement(ClipboardIcon, { className: "w-4 h-4 text-slate-400" }),
+                  React.createElement("span", null, isCopied ? 'Copied!' : 'Copy')
+                )
+              ),
+              isLoading && !result && React.createElement(SkeletonLoader, null),
+              result && React.createElement("div", {
+                className: "prose prose-invert max-w-none prose-p:text-slate-300 prose-headings:text-white whitespace-pre-wrap",
+                style: { minHeight: '12rem' }
+              }, result)
+            )
+          );
+        };
+        
+        const AIChat = () => {
+            const [messages, setMessages] = useState([]);
+            const [input, setInput] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const chatRef = useRef(null);
+            const messagesEndRef = useRef(null);
+
+            useEffect(() => {
+                if (ai) {
+                    chatRef.current = ai.chats.create({
+                        model: 'gemini-2.5-flash',
+                        config: {
+                            systemInstruction: 'You are a friendly and helpful AI assistant named PsycTools Chatbot. Engage in a natural, conversational manner. Format your responses using markdown for readability where appropriate (e.g., lists, bold text).',
+                        },
+                    });
+                    setMessages([{ sender: 'bot', text: "Hello! How can I help you today?" }]);
+                } else {
+                    setError("API Key not found. Please ensure it's configured correctly.");
+                }
+            }, []);
+
+            useEffect(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            }, [messages]);
+
+            const handleSend = async (e) => {
+                e.preventDefault();
+                if (!input.trim() || isLoading || !chatRef.current) return;
+                
+                const userMessage = { sender: 'user', text: input };
+                setMessages(prev => [...prev, userMessage]);
+                const currentInput = input;
+                setInput('');
+                setIsLoading(true);
+                setError(null);
+
+                try {
+                    const result = await chatRef.current.sendMessageStream({ message: currentInput });
+                    let botResponse = '';
+                    setMessages(prev => [...prev, { sender: 'bot', text: '' }]);
+                    for await (const chunk of result) {
+                        botResponse += chunk.text;
+                        setMessages(prev => {
+                            const newMessages = [...prev];
+                            newMessages[newMessages.length - 1].text = botResponse;
+                            return newMessages;
+                        });
+                    }
+                } catch (err) {
+                    console.error("Chat API error:", err);
+                    const errorMessage = "Sorry, I encountered an error. Please try again.";
+                    setMessages(prev => [...prev, { sender: 'bot', text: errorMessage }]);
+                    setError("Failed to get a response from the AI. Please check your connection or API key.");
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+            
+            return React.createElement("div", { className: "bg-slate-900/50 backdrop-blur-lg border border-slate-700/50 rounded-2xl shadow-2xl shadow-green-500/10 flex flex-col", style: {height: '75vh'} },
+                React.createElement("div", { className: "flex items-center gap-4 p-4 border-b border-slate-700/50" },
+                    React.createElement("div", { className: "p-2 bg-slate-800/80 rounded-lg border border-slate-700" },
+                        React.createElement(ChatbotIcon, { className: "w-8 h-8 text-green-400" })
+                    ),
+                    React.createElement("h2", { className: "text-2xl font-bold" }, "AI Chatbot")
+                ),
+                React.createElement("div", { className: "flex-1 p-4 overflow-y-auto space-y-4" },
+                    messages.map((msg, index) => (
+                        React.createElement("div", { key: index, className: `flex items-end gap-2 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}` },
+                           msg.sender === 'bot' && React.createElement("div", { className: "flex-shrink-0 w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-green-400" }, "AI"),
+                           React.createElement("div", {
+                                className: `max-w-md lg:max-w-lg p-3 rounded-2xl prose prose-invert prose-p:text-slate-300 whitespace-pre-wrap ${
+                                    msg.sender === 'user' 
+                                    ? 'bg-blue-600 text-white rounded-br-none' 
+                                    : 'bg-slate-800 text-slate-300 rounded-bl-none'
+                                }`
+                            }, msg.text || '...')
+                        )
+                    )),
+                    isLoading && messages[messages.length - 1]?.sender === 'user' && (
+                         React.createElement("div", { className: "flex items-end gap-2 justify-start" },
+                            React.createElement("div", { className: "flex-shrink-0 w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-green-400" }, "AI"),
+                            React.createElement("div", { className: "max-w-xs p-3 rounded-2xl bg-slate-800 rounded-bl-none" },
+                                React.createElement(Spinner, null)
+                             )
+                         )
+                    ),
+                    React.createElement("div", { ref: messagesEndRef })
+                ),
+                error && React.createElement("p", { className: "p-4 text-red-400 border-t border-slate-700/50", role: "alert" }, error),
+                React.createElement("form", { onSubmit: handleSend, className: "p-4 border-t border-slate-700/50" },
+                    React.createElement("div", { className: "relative" },
+                        React.createElement("input", {
+                            type: "text",
+                            value: input,
+                            onChange: (e) => setInput(e.target.value),
+                            placeholder: "Type your message...",
+                            disabled: isLoading,
+                            className: "w-full p-3 pr-12 bg-slate-800 border border-slate-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none transition-all",
+                            "aria-label": "Chat input"
+                        }),
+                        React.createElement("button", { 
+                            type: "submit",
+                            disabled: isLoading || !input.trim(),
+                            className: "absolute inset-y-0 right-0 flex items-center justify-center w-12 text-slate-400 hover:text-green-400 disabled:text-slate-600 disabled:cursor-not-allowed transition-colors",
+                            "aria-label": "Send message"
+                        }, React.createElement(SendIcon, { className: "w-6 h-6" }))
+                    )
+                )
+            );
+        };
+        
+        const tools = [
+          { type: 'chat', id: 'ai-chatbot', icon: React.createElement(ChatbotIcon, { className: "w-8 h-8" }), title: 'AI Chatbot', description: 'Have a conversation with a powerful AI assistant.', color: 'green' },
+          { type: 'generic', id: 'youtube-script', icon: React.createElement(YouTubeIcon, { className: "w-8 h-8" }), title: 'YouTube Script Generator', description: 'Turn your ideas into engaging video scripts in seconds.', color: 'red', promptLabel: 'Video Topic or Idea', promptPlaceholder: 'e.g., Unboxing the new AI-powered camera, A tutorial on advanced CSS grid...', demoPrompt: 'A short documentary about the history of video games.', systemInstruction: 'You are a professional screenwriter specializing in YouTube content. Generate a compelling, well-structured video script based on the user\'s topic. The script should include sections for an engaging hook, main content with clear points, and a call-to-action outro. Format the script with speaker names (e.g., NARRATOR) and visual cues (e.g., [Shot of...]).', outputTitle: 'Generated YouTube Script' },
+          { type: 'generic', id: 'story-writer', icon: React.createElement(BookOpenIcon, { className: "w-8 h-8" }), title: 'AI Story Writer', description: 'Generate creative and engaging stories from a simple prompt.', color: 'purple', promptLabel: 'Story Prompt', promptPlaceholder: 'e.g., A detective in a neon-lit city solving the mystery of a stolen memory...', demoPrompt: 'A lone astronaut discovering a glowing, ancient artifact on a desolate moon.', systemInstruction: "You are a master storyteller. Your task is to write a captivating, well-structured, and imaginative short story based on the user's prompt. Ensure the narrative has a clear beginning, middle, and end. The tone should be engaging and appropriate for the prompt's theme.", outputTitle: 'Generated Story' },
+          { type: 'generic', id: 'blog-writer', icon: React.createElement(WriterIcon, { className: "w-8 h-8" }), title: 'AI Blog Writer', description: 'Generate high-quality blog posts and articles on any topic.', color: 'blue', promptLabel: 'Blog Post Topic', promptPlaceholder: 'e.g., The benefits of a minimalist lifestyle, Top 10 travel destinations for 2025...', demoPrompt: 'The impact of artificial intelligence on creative industries.', systemInstruction: 'You are an expert content writer and SEO specialist. Write a comprehensive, engaging, and well-structured blog post on the given topic. The post should have a catchy title, an introduction, multiple subheadings for the body, and a concluding paragraph. Use a professional yet accessible tone.', outputTitle: 'Generated Blog Post' },
+          { type: 'generic', id: 'description-generator', icon: React.createElement(DescriptionIcon, { className: "w-8 h-8" }), title: 'AI Description Generator', description: 'Create compelling descriptions for products, services, or listings.', color: 'teal', promptLabel: 'Item to Describe', promptPlaceholder: 'e.g., A handmade leather wallet, a new productivity app, a real estate listing for a modern apartment...', demoPrompt: 'A smart coffee mug that keeps drinks at the perfect temperature.', systemInstruction: 'You are a professional copywriter. Write a concise, persuasive, and appealing description for the item provided by the user. Highlight the key features and benefits in a way that attracts customers. The tone should be tailored to the item.', outputTitle: 'Generated Description' },
+          { type: 'generic', id: 'ad-copy-generator', icon: React.createElement(AdCopyIcon, { className: "w-8 h-8" }), title: 'AI Ad Copy Generator', description: 'Generate high-converting copy for your advertisements.', color: 'orange', promptLabel: 'Product/Service & Target Audience', promptPlaceholder: 'e.g., Product: Vegan protein powder. Audience: Fitness enthusiasts aged 20-35.', demoPrompt: 'Product: A language learning app. Audience: Travelers and students.', systemInstruction: 'You are a direct response copywriter with a knack for creating high-converting ads. Based on the user\'s product and audience, generate 3-5 different ad copy variations. Each variation should include a compelling headline and a clear call-to-action. Use persuasive language.', outputTitle: 'Generated Ad Copy' },
+          { type: 'generic', id: 'hook-generator', icon: React.createElement(HookIcon, { className: "w-8 h-8" }), title: 'AI Hook Generator', description: 'Create catchy hooks for videos, articles, or social media posts.', color: 'pink', promptLabel: 'Content Topic', promptPlaceholder: 'e.g., How to save money on groceries, The secrets of ancient Egypt...', demoPrompt: 'The science of getting better sleep.', systemInstruction: 'You are a viral content strategist. Generate a list of 5-7 attention-grabbing hooks for the given content topic. The hooks should be short, intriguing, and make the audience want to learn more. Vary the style of the hooks (e.g., question, bold statement, statistic).', outputTitle: 'Generated Hooks' },
+          { type: 'generic', id: 'script-outliner', icon: React.createElement(OutlineIcon, { className: "w-8 h-8" }), title: 'AI Script Outliner', description: 'Quickly structure your video or presentation scripts.', color: 'yellow', promptLabel: 'Topic for the Script', promptPlaceholder: 'e.g., A presentation on climate change, a tutorial for a software...', demoPrompt: 'A video essay on the rise of remote work.', systemInstruction: 'You are an expert content planner. Create a logical and detailed outline for a script based on the user\'s topic. The outline should include key sections like Introduction, Main Points (with sub-points), and Conclusion. This structure should serve as a clear roadmap for the writer.', outputTitle: 'Generated Script Outline' },
+          { type: 'generic', id: 'hashtag-generator', icon: React.createElement(HashtagIcon, { className: "w-8 h-8" }), title: 'AI Hashtag Generator', description: 'Find the best hashtags to boost your social media reach.', color: 'cyan', promptLabel: 'Post Topic or Keywords', promptPlaceholder: 'e.g., landscape photography, healthy recipes, digital marketing tips...', demoPrompt: 'A photo of a sunset over the ocean.', systemInstruction: 'You are a social media expert. Generate a list of 20-30 relevant hashtags for the given topic. Include a mix of popular, niche, and specific hashtags to maximize reach and engagement. Group them by relevance.', outputTitle: 'Generated Hashtags' },
+          { type: 'generic', id: 'caption-writer', icon: React.createElement(CaptionIcon, { className: "w-8 h-8" }), title: 'AI Caption Writer', description: 'Write engaging captions for your social media posts.', color: 'red', promptLabel: 'What is your post about?', promptPlaceholder: 'e.g., A picture of my morning coffee, celebrating a new job, launching a new product...', demoPrompt: 'A travel photo from a trip to Paris, standing in front of the Eiffel Tower.', systemInstruction: 'You are a creative social media manager. Write 3-5 engaging caption options for the user\'s post description. The captions should be tailored to the context, potentially include a question to boost engagement, and have a friendly, authentic tone.', outputTitle: 'Generated Captions' },
+          { type: 'generic', id: 'grammar-corrector', icon: React.createElement(GrammarIcon, { className: "w-8 h-8" }), title: 'AI Grammar Corrector', description: 'Correct grammar and spelling mistakes in your text.', color: 'green', promptLabel: 'Text to Correct', promptPlaceholder: 'Paste your text here...', demoPrompt: 'their is too reasons why i love to traveling. First, it let me experience new cultures. Second, the food are amazing.', systemInstruction: 'You are a meticulous editor. Correct any grammatical errors, spelling mistakes, and punctuation issues in the provided text. Only output the corrected version of the text without any explanations.', outputTitle: 'Corrected Text' },
+          { type: 'generic', id: 'summarizer', icon: React.createElement(SummarizeIcon, { className: "w-8 h-8" }), title: 'AI Summarizer', description: 'Summarize any text into concise, easy-to-read points.', color: 'blue', promptLabel: 'Text to Summarize', promptPlaceholder: 'Paste your article, notes, or document here...', demoPrompt: 'Artificial intelligence (AI) is a wide-ranging branch of computer science concerned with building smart machines capable of performing tasks that typically require human intelligence. AI is an interdisciplinary science with multiple approaches, but advancements in machine learning and deep learning are creating a paradigm shift in virtually every sector of the tech industry.', systemInstruction: 'You are an expert summarizer. Analyze the provided text and create a concise summary that captures the main points and key information. The summary should be clear, accurate, and significantly shorter than the original text. Use bullet points if appropriate.', outputTitle: 'Summary' },
+          { type: 'generic', id: 'email-writer', icon: React.createElement(EmailIcon, { className: "w-8 h-8" }), title: 'AI Email Writer', description: 'Craft professional and effective emails for any situation.', color: 'purple', promptLabel: 'Purpose of the Email', promptPlaceholder: 'e.g., A follow-up after a job interview, a request for a meeting, a thank you note to a client...', demoPrompt: 'Write a professional email to a potential collaborator proposing a partnership on a new project.', systemInstruction: 'You are a professional communications assistant. Write a clear, concise, and effective email based on the user\'s stated purpose. The email should have a proper subject line, greeting, body, and closing. The tone should be appropriate for the context provided.', outputTitle: 'Generated Email' },
+          { type: 'generic', id: 'coding-helper', icon: React.createElement(CodeIcon, { className: "w-8 h-8" }), title: 'AI Coding Helper', description: 'Get help with code, write functions, and solve programming problems.', color: 'teal', promptLabel: 'Your Coding Question', promptPlaceholder: 'e.g., How to write a Python function to reverse a string, explain the concept of recursion...', demoPrompt: 'Write a JavaScript function that fetches data from an API and displays it on the page.', systemInstruction: 'You are an expert programmer and code assistant. Provide a clear, accurate, and well-explained solution to the user\'s programming question. If providing code, include comments to explain the logic. Use markdown for code blocks.', outputTitle: 'Coding Assistance' },
+          { type: 'generic', id: 'error-debugger', icon: React.createElement(BugIcon, { className: "w-8 h-8" }), title: 'AI Error Debugger', description: 'Understand and fix error messages in your code.', color: 'orange', promptLabel: 'Paste Your Error Message & Code', promptPlaceholder: 'e.g., "TypeError: Cannot read properties of undefined" followed by the relevant code block...', demoPrompt: 'Error: "Uncaught ReferenceError: myFunction is not defined"\n\nCode:\n<button onclick="myFunction()">Click me</button>', systemInstruction: 'You are a senior software engineer and an expert debugger. Analyze the provided error message and code snippet. Explain what the error means in simple terms, identify the likely cause, and provide a corrected version of the code to fix the issue.', outputTitle: 'Debugging Analysis' },
+          { type: 'generic', id: 'qna-generator', icon: React.createElement(QnAIcon, { className: "w-8 h-8" }), title: 'AI Q&A Generator', description: 'Create questions and answers from any block of text.', color: 'pink', promptLabel: 'Paste Your Text Content', promptPlaceholder: 'e.g., A chapter from a textbook, an article about a historical event...', demoPrompt: 'The mitochondria is the powerhouse of the cell. It generates most of the cell\'s supply of adenosine triphosphate (ATP), used as a source of chemical energy.', systemInstruction: 'You are an educational content creator. Based on the text provided by the user, generate a list of 5-10 question-and-answer pairs that cover the key information in the text. Format it clearly with "Q:" and "A:" prefixes.', outputTitle: 'Generated Q&A' },
+          { type: 'generic', id: 'exam-question-maker', icon: React.createElement(ExamIcon, { className: "w-8 h-8" }), title: 'AI Exam Question Maker', description: 'Generate exam questions (e.g., multiple choice, short answer).', color: 'yellow', promptLabel: 'Topic and Question Type', promptPlaceholder: 'e.g., Topic: World War II, Type: Multiple Choice. Or Topic: Photosynthesis, Type: Short Answer.', demoPrompt: 'Topic: The Solar System. Type: 4-option Multiple Choice.', systemInstruction: 'You are a professional educator and test creator. Generate 5 exam-style questions based on the user\'s topic and question type. For multiple-choice questions, provide the correct answer. The questions should be clear, accurate, and relevant to the topic.', outputTitle: 'Generated Exam Questions' },
+          { type: 'generic', id: 'long-article-summarizer', icon: React.createElement(SummarizeIcon, { className: "w-8 h-8"}), title: 'AI Long Article Summarizer', description: 'Condense long articles into key takeaways.', color: 'blue', promptLabel: 'Article Text', promptPlaceholder: 'Paste your long article here...', demoPrompt: 'The French Revolution was a period of far-reaching social and political upheaval in France and its colonies beginning in 1789. The Revolution overthrew the monarchy, established a republic, catalyzed violent periods of political turmoil, and finally culminated in a dictatorship under Napoleon who brought many of its principles to areas he conquered in Western Europe and beyond. Inspired by liberal and radical ideas, the Revolution profoundly altered the course of modern history, triggering the global decline of absolute monarchies while replacing them with republics and liberal democracies.', systemInstruction: 'You are an expert at summarizing long-form content. Distill the provided article into a set of key bullet points and a concluding paragraph.', outputTitle: 'Summary' },
+          { type: 'generic', id: 'notes-maker', icon: React.createElement(NotesIcon, { className: "w-8 h-8"}), title: 'AI Notes Maker', description: 'Turn lectures or text into structured notes.', color: 'purple', promptLabel: 'Content to make notes from', promptPlaceholder: 'Paste a block of text from a lecture or book...', demoPrompt: 'Photosynthesis is a process used by plants, algae, and certain bacteria to convert light energy into chemical energy, through a process that converts carbon dioxide and water into glucose (sugar) and oxygen. This process is crucial for life on Earth as it produces most of the oxygen in the atmosphere.', systemInstruction: 'You are a diligent student. Convert the provided text into clear, organized notes using headings and bullet points.', outputTitle: 'Generated Notes' },
+          { type: 'generic', id: 'idea-generator', icon: React.createElement(IdeaIcon, { className: "w-8 h-8"}), title: 'AI Idea Generator', description: 'Brainstorm creative ideas on any topic.', color: 'orange', promptLabel: 'Topic for ideas', promptPlaceholder: 'e.g., YouTube channel ideas, app ideas, podcast topics...', demoPrompt: 'Business ideas that can be started with less than $1000.', systemInstruction: 'You are a creative brainstormer. Generate a list of 10 unique and interesting ideas based on the user\'s topic.', outputTitle: 'Generated Ideas' },
+          { type: 'generic', id: 'seo-title-generator', icon: React.createElement(SEOIcon, { className: "w-8 h-8"}), title: 'AI SEO Title Generator', description: 'Create SEO-friendly titles for your content.', color: 'green', promptLabel: 'Keywords or Topic', promptPlaceholder: 'e.g., best vegan chocolate chip cookies, learn javascript for beginners...', demoPrompt: 'how to improve home office productivity', systemInstruction: 'You are an SEO expert. Generate 5 SEO-optimized title tags for a webpage about the given topic. Keep them under 60 characters.', outputTitle: 'Generated SEO Titles' },
+          { type: 'generic', id: 'seo-description-generator', icon: React.createElement(SEOIcon, { className: "w-8 h-8"}), title: 'AI SEO Description Generator', description: 'Write compelling meta descriptions.', color: 'green', promptLabel: 'Keywords or Topic', promptPlaceholder: 'e.g., digital marketing agency new york, home yoga mat...', demoPrompt: 'A blog post about the benefits of meditation.', systemInstruction: 'You are an SEO expert. Generate 3 compelling meta descriptions for a webpage about the given topic. Keep them under 160 characters and include a call-to-action.', outputTitle: 'Generated SEO Descriptions' },
+          { type: 'generic', id: 'translation-tool', icon: React.createElement(TranslateIcon, { className: "w-8 h-8"}), title: 'AI Translation Tool', description: 'Translate text between different languages.', color: 'cyan', promptLabel: 'Text to translate (e.g., "Translate \'Hello, how are you?\' to French")', promptPlaceholder: 'Enter text and target language...', demoPrompt: 'Translate "The quick brown fox jumps over the lazy dog" to German.', systemInstruction: 'You are a polyglot translator. Translate the given text as requested by the user accurately.', outputTitle: 'Translation' },
+          { type: 'generic', id: 'product-description-generator', icon: React.createElement(ProductIcon, { className: "w-8 h-8"}), title: 'AI Product Description Generator', description: 'Write persuasive product descriptions.', color: 'teal', promptLabel: 'Product Name and Features', promptPlaceholder: 'e.g., Product: Wireless Noise-Cancelling Headphones. Features: 30-hour battery, Bluetooth 5.0, foldable design.', demoPrompt: 'Product: Automatic pet feeder. Features: Wi-Fi enabled, app control, portion control, voice recorder.', systemInstruction: 'You are an e-commerce copywriter. Write a persuasive product description based on the provided product name and features. Focus on benefits over features.', outputTitle: 'Generated Product Description' },
+          { type: 'generic', id: 'review-writer', icon: React.createElement(ReviewIcon, { className: "w-8 h-8"}), title: 'AI Review Writer', description: 'Generate reviews for products, services, or places.', color: 'yellow', promptLabel: 'Item to review and sentiment (positive/negative)', promptPlaceholder: 'e.g., A coffee shop, positive. Or: A movie I just watched, negative.', demoPrompt: 'Item: A new sci-fi movie. Sentiment: Positive.', systemInstruction: 'You are a helpful customer. Write a review for the given item with the specified sentiment. Make it sound authentic and provide specific reasons.', outputTitle: 'Generated Review' },
+        ];
+        
+        const App = () => {
+          const [activeToolId, setActiveToolId] = useState(null);
+
+          const renderActiveTool = () => {
+            if (!activeToolId) return null;
+            const toolConfig = tools.find(t => t.id === activeToolId);
+            if (!toolConfig) return null;
+            if (toolConfig.type === 'chat') {
+              return React.createElement(AIChat, null);
+            }
+            return React.createElement(GenericTool, { tool: toolConfig });
+          };
+
+          return React.createElement("div", { className: "min-h-screen bg-transparent text-white p-4 sm:p-6 lg:p-8 flex flex-col" },
+            React.createElement("div", { className: "w-full max-w-5xl mx-auto" },
+              React.createElement("header", {
+                  className: "w-full flex justify-center mb-12 md:mb-16 opacity-0 animate-fade-in",
+                  style: { animationDelay: '100ms' }
+                },
+                React.createElement("div", { className: "flex items-center gap-4 bg-gradient-to-r from-purple-600/30 to-blue-600/30 backdrop-blur-lg border border-purple-400/30 rounded-2xl px-6 py-4 animate-gradient-pan shadow-2xl shadow-purple-500/10" },
+                  React.createElement(LogoIcon, { className: "w-9 h-9" }),
+                  React.createElement("h1", { className: "text-3xl md:text-4xl font-bold tracking-tight text-white" }, "PsycTools")
+                )
+              ),
+              React.createElement("main", null,
+                activeToolId ? React.createElement("div", { className: "animate-fade-in" },
+                  React.createElement("button", {
+                      onClick: () => setActiveToolId(null),
+                      className: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-8 group"
+                    },
+                    React.createElement(ArrowLeftIcon, { className: "w-5 h-5 transition-transform group-hover:-translate-x-1" }),
+                    React.createElement("span", null, "Back to All Tools")
+                  ),
+                  renderActiveTool()
+                ) : React.createElement("div", null,
+                  React.createElement("div", {
+                      className: "text-center mb-16 opacity-0 animate-fade-in",
+                      style: { animationDelay: '250ms' }
+                    },
+                    React.createElement("h2", { className: "text-3xl md:text-4xl font-bold tracking-tight" }, "Welcome to PsycTools"),
+                    React.createElement("p", { className: "mt-4 text-lg max-w-2xl mx-auto text-slate-400" }, "All Tools in One Place. Your next-generation creative AI studio for text, images, video, and more.")
+                  ),
+                  React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-8" },
+                    tools.map((tool, index) => React.createElement("div", {
+                        key: tool.id,
+                        className: "opacity-0 animate-fade-in",
+                        style: { animationDelay: `${400 + index * 75}ms` }
+                      },
+                      React.createElement(ToolCard, {
+                        tool: tool,
+                        onClick: () => setActiveToolId(tool.id)
+                      })
+                    ))
+                  )
+                )
+              ),
+              React.createElement("footer", {
+                  className: "text-center mt-20 text-slate-500 text-sm opacity-0 animate-fade-in",
+                  style: { animationDelay: '500ms' }
+                },
+                React.createElement("p", null, `© ${new Date().getFullYear()} PsycTools. All rights reserved.`)
+              )
+            )
+          );
+        };
+
+        // --- Render App ---
+        const rootElement = document.getElementById('root');
+        if (rootElement) {
+            const root = ReactDOM.createRoot(rootElement);
+            root.render(
+              React.createElement(React.StrictMode, null, 
+                React.createElement(App, null)
+              )
+            );
+        } else {
+            console.error("Fatal Error: Root element with id 'root' not found.");
+        }
+    </script>
+  </body>
+</html>
